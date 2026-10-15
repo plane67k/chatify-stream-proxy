@@ -1,5 +1,9 @@
 const https = require('https');
 const http = require('http');
+const dns = require('dns');
+
+// Force Google DNS + Cloudflare DNS — bypasses Vercel's default resolver
+dns.setServers(['8.8.8.8', '1.1.1.1']);
 
 module.exports = async (req, res) => {
   const target = req.query.url;
@@ -45,17 +49,20 @@ function fetchWithRedirects(url, headers, maxHops) {
       method: 'GET',
       headers,
       timeout: 20000,
-      rejectUnauthorized: false // tolerate cert issues that browsers accept
+      rejectUnauthorized: false,
+      // Use dns.lookup which respects dns.setServers
+      lookup: (hostname, options, callback) => {
+        dns.lookup(hostname, options, callback);
+      }
     };
 
     const req = lib.request(url, opts, (response) => {
-      // Follow redirects
       if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
         let next;
         try { next = new URL(response.headers.location, url); } catch (e) {
           return reject(new Error('bad redirect target'));
         }
-        response.resume(); // discard body
+        response.resume();
         return fetchWithRedirects(next, headers, maxHops - 1).then(resolve).catch(reject);
       }
 
@@ -75,9 +82,7 @@ function fetchWithRedirects(url, headers, maxHops) {
       req.destroy();
       reject(new Error('timeout after 20s'));
     });
-    req.on('error', (err) => {
-      reject(err);
-    });
+    req.on('error', (err) => reject(err));
     req.end();
   });
 }
